@@ -474,6 +474,52 @@ export class WebjsClientCore extends Client {
     return sentMsg ? new Message(this, sentMsg) : undefined;
   }
 
+  async forwardMessage(chatId: string, messageId: string): Promise<any> {
+    return this.pupPage.evaluate(
+      async function forwardMessage(chatId, messageId) {
+        const collections = window.require('WAWebCollections');
+        const wwebjs = (window as any).WWebJS;
+        const message =
+          collections.Msg.get(messageId) ||
+          (await collections.Msg.getMessagesById([messageId]))?.messages?.[0];
+        if (!message) {
+          throw new Error(`Message not found: ${messageId}`);
+        }
+
+        // WhatsApp loads forwarding in an on-demand bundle. A fresh session
+        // does not have WAWebChatForwardMessage until that bundle is loaded.
+        const forwardModule = await wwebjs.requireLazy(
+          'WAWebChatForwardMessage',
+          {
+            WAWebMediaForwardMediaMsg: 'WAHAForwardMessage',
+            'WAWebForwardMessageFlow.react': 'WAHAForwardMessage',
+            'WAWebForwardMessageModal.react': 'WAHAForwardMessage',
+          },
+        );
+        if (typeof forwardModule?.forwardMessages !== 'function') {
+          throw new Error("WhatsApp's forwardMessages function is unavailable");
+        }
+
+        const chat = await wwebjs.getChat(chatId, {
+          getAsModel: false,
+        });
+        if (!chat) {
+          throw new Error(`Chat not found: ${chatId}`);
+        }
+
+        return forwardModule.forwardMessages({
+          chat: chat,
+          msgs: [message],
+          multicast: true,
+          includeCaption: true,
+          appendedText: undefined,
+        });
+      },
+      chatId,
+      messageId,
+    );
+  }
+
   async getMessages(
     chatId: string,
     filter: GetChatMessagesFilter,

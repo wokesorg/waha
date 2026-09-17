@@ -1249,12 +1249,11 @@ export class WhatsappSessionWebJSCore extends WhatsappSession {
 
   @Activity()
   async forwardMessage(request: MessageForwardRequest): Promise<WAMessage> {
-    const forwardMessage = this.recreateMessage(request.messageId);
     const chatId = await this.hooks.wid.chat.promise(
       request.chatId,
       'forwardMessage',
     );
-    const msg = await forwardMessage.forward(chatId);
+    const msg = await this.whatsapp.forwardMessage(chatId, request.messageId);
     // Return "sent: true" for now
     // need to research how to get the data from WebJS
     // @ts-ignore
