@@ -13,7 +13,13 @@ import { EventEmitter } from 'events';
 import * as lodash from 'lodash';
 import { Logger } from 'pino';
 import { Page } from 'puppeteer';
-import { Client, Events, Message as WebjsMessage } from 'whatsapp-web.js';
+import {
+  Client,
+  Events,
+  Message as WebjsMessage,
+  MessageMedia,
+  MessageSendOptions,
+} from 'whatsapp-web.js';
 import { Message } from 'whatsapp-web.js/src/structures';
 import { Message as MessageInstance } from 'whatsapp-web.js/src/structures';
 
@@ -518,6 +524,95 @@ export class WebjsClientCore extends Client {
       chatId,
       messageId,
     );
+  }
+
+  async sendMediaMessage(
+    chatId: string,
+    media: MessageMedia,
+    options: MessageSendOptions,
+  ): Promise<Message | undefined> {
+    const sentMsg = await this.pupPage.evaluate(
+      async function sendMediaMessage(chatId, media, options) {
+        const wwebjs = (window as any).WWebJS;
+        const chat = await wwebjs.getChat(chatId, {
+          getAsModel: false,
+        });
+        if (!chat) {
+          throw new Error(`Chat not found: ${chatId}`);
+        }
+
+        if (options.sendSeen !== false) {
+          await wwebjs.sendSeen(chatId);
+        }
+
+        const file = wwebjs.mediaInfoToFile(media);
+        const opaqueDataModule = window.require('WAWebMediaOpaqueData');
+        const opaqueData = await opaqueDataModule.createFromData(
+          file,
+          media.mimetype,
+        );
+        const mediaParams: {
+          asSticker?: boolean;
+          asGif?: boolean;
+          isPtt?: boolean;
+          asDocument?: boolean;
+          maxDimension?: number;
+        } = {
+          asSticker: options.sendMediaAsSticker,
+          asGif: options.sendVideoAsGif,
+          isPtt: options.sendAudioAsVoice,
+          asDocument: options.sendMediaAsDocument,
+        };
+        if (options.sendMediaAsHd && file.type.indexOf('image/') === 0) {
+          mediaParams.maxDimension = 2560;
+        }
+
+        const mediaPrep = window
+          .require('WAWebPrepRawMedia')
+          .prepRawMedia(opaqueData, mediaParams);
+
+        let quotedMsg;
+        if (options.quotedMessageId) {
+          const messages = window.require('WAWebCollections').Msg;
+          quotedMsg =
+            messages.get(options.quotedMessageId) ||
+            (await messages.getMessagesById([options.quotedMessageId]))
+              ?.messages?.[0];
+          if (!quotedMsg && options.ignoreQuoteErrors === false) {
+            throw new Error('Could not get the quoted message.');
+          }
+        }
+
+        const widFactory = window.require('WAWebWidFactory');
+        const mentionedJidList = (options.mentions || [])
+          .map((id) => widFactory.createWid(id))
+          .filter(Boolean);
+        const groupMentions = (options.groupMentions || []).map((mention) => ({
+          groupSubject: mention.subject,
+          groupJid: widFactory.createWid(mention.id),
+        }));
+
+        // Use WhatsApp's current media pipeline so it generates the outgoing
+        // message data and id. The legacy hand-built payload is no longer
+        // accepted by recent WhatsApp Web builds.
+        const result = await mediaPrep.sendToChat({
+          chat: chat,
+          options: {
+            caption: options.caption,
+            isViewOnce: options.isViewOnce,
+            quotedMsg: quotedMsg,
+            mentionedJidList: mentionedJidList,
+            groupMentions: groupMentions,
+          },
+        });
+        return result?.msg ? wwebjs.getMessageModel(result.msg) : undefined;
+      },
+      chatId,
+      media,
+      options,
+    );
+
+    return sentMsg ? new Message(this, sentMsg) : undefined;
   }
 
   async getMessages(

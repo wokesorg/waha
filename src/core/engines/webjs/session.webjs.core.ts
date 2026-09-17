@@ -1100,16 +1100,12 @@ export class WhatsappSessionWebJSCore extends WhatsappSession {
     options = {
       ...options,
       caption: request.caption,
-      // whatsapp-web.js enables link previews by default. For image messages,
-      // the generated image preview can be mistaken for a link and passed to
-      // WhatsApp's link-preview getter without a chat id.
-      linkPreview: false,
     };
     const chatId = await this.hooks.wid.chat.promise(
       request.chatId,
       'sendImage',
     );
-    return this.whatsapp.sendMessage(chatId, media, options);
+    return this.whatsapp.sendMediaMessage(chatId, media, options);
   }
 
   @Activity()
